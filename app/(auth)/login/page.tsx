@@ -9,13 +9,30 @@ import { API_BASE_URL } from '@/lib/api'
 import { AUTH_TOKEN_KEY } from '@/lib/auth'
 
 type LoginResponse = {
-  message?: string
+  data?: {
+    access_token?: string
+  }
   token?: string
   access_token?: string
   [key: string]: unknown
 }
 
+type ApiErrorPayload = {
+  error?: {
+    code?: string
+    message?: string
+    details?: Record<string, string[] | string | undefined>
+  }
+}
+
 const extractToken = (payload: LoginResponse) => {
+  if (
+    typeof payload.data?.access_token === 'string' &&
+    payload.data.access_token.length > 0
+  ) {
+    return payload.data.access_token
+  }
+
   if (typeof payload.token === 'string' && payload.token.length > 0) {
     return payload.token
   }
@@ -30,17 +47,27 @@ const extractToken = (payload: LoginResponse) => {
   return null
 }
 
+const getFirstError = (value: string[] | string | undefined) => {
+  if (Array.isArray(value)) return value[0] ?? ''
+  if (typeof value === 'string') return value
+  return ''
+}
+
 export default function LoginPage() {
   const router = useRouter()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [globalError, setGlobalError] = useState('')
+  const [emailError, setEmailError] = useState('')
+  const [passwordError, setPasswordError] = useState('')
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    setError('')
+    setGlobalError('')
+    setEmailError('')
+    setPasswordError('')
     setLoading(true)
 
     try {
@@ -49,13 +76,12 @@ export default function LoginPage() {
         { email, password },
         {
           withCredentials: true,
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem(AUTH_TOKEN_KEY) || ''}`,
-          },
         },
       )
 
       const payload = response.data ?? {}
+      console.log('[LOGIN][TRY] status:', response.status)
+      console.log('[LOGIN][TRY] payload:', payload)
 
       const token = extractToken(payload)
 
@@ -68,12 +94,28 @@ export default function LoginPage() {
       router.push('/home')
     } catch (err) {
       if (axios.isAxiosError(err)) {
-        const apiMessage = err.response?.data?.message
-        setError(
-          typeof apiMessage === 'string' ? apiMessage : 'Falha ao autenticar.',
-        )
+        const apiError = (err.response?.data as ApiErrorPayload | undefined)?.error
+        const code = apiError?.code
+        const message = apiError?.message || 'Erro inesperado.'
+        const details = apiError?.details || {}
+
+        const nextEmailError = getFirstError(details.email)
+        const nextPasswordError = getFirstError(details.password)
+
+        setEmailError(nextEmailError)
+        setPasswordError(nextPasswordError)
+
+        const hasFieldErrors = Boolean(nextEmailError || nextPasswordError)
+
+        console.log('[LOGIN][CATCH] status:', err.response?.status)
+        console.log('[LOGIN][CATCH] payload:', err.response?.data)
+        console.log('[LOGIN][CATCH] parsed:', { code, message, details })
+
+        if (code === 'app_error' || !hasFieldErrors) {
+          setGlobalError(message)
+        }
       } else {
-        setError('Erro inesperado no login.')
+        setGlobalError('Erro inesperado no login.')
       }
     } finally {
       setLoading(false)
@@ -81,17 +123,17 @@ export default function LoginPage() {
   }
 
   return (
-    <section className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#070B14] px-4 py-12">
-      <div className="pointer-events-none absolute -left-24 top-10 h-72 w-72 rounded-full bg-emerald-500/25 blur-3xl" />
-      <div className="pointer-events-none absolute -right-24 bottom-10 h-72 w-72 rounded-full bg-cyan-500/20 blur-3xl" />
+    <section className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gray-900 px-4 py-12">
+      <div className="pointer-events-none absolute -left-24 top-10 h-72 w-72 rounded-full bg-primary-500/30 blur-3xl" />
+      <div className="pointer-events-none absolute -right-24 bottom-10 h-72 w-72 rounded-full bg-success-500/25 blur-3xl" />
 
-      <div className="w-full max-w-md rounded-[30px] border border-white/10 bg-gradient-to-b from-white/10 to-white/[0.03] p-8 text-white shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur-md">
-        <h1 className="mt-2 text-4xl font-bold tracking-tight">Bem-vindo de volta</h1>
-        <p className="mt-2 text-base text-white/70">Digite suas credenciais de acesso</p>
+      <div className="w-full max-w-md rounded-[30px] border border-white/10 bg-gradient-to-b from-gray-700/40 to-gray-900/70 p-8 text-white shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur-md">
+        <h1 className="text-h1 text-white">Bem-vindo de volta</h1>
+        <p className="mt-2 text-body text-gray-300">Digite suas credenciais de acesso</p>
 
         <form onSubmit={handleLogin} className="mt-10 space-y-5">
           <div className="space-y-2">
-            <label htmlFor="email" className="text-sm text-white/85">
+            <label htmlFor="email" className="text-small text-gray-100">
               Email
             </label>
             <input
@@ -100,14 +142,21 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="rafael.martins@example.com"
-              className="w-full rounded-xl border border-white/15 bg-white/[0.04] px-4 py-3 text-white placeholder:text-white/35 outline-none transition focus:border-white/30"
+              className={`w-full rounded-xl border px-4 py-3 text-white placeholder:text-gray-500 outline-none transition ${
+                emailError
+                  ? 'border-error-500 bg-error-100/10'
+                  : 'border-gray-500 bg-white/[0.04] focus:border-primary-500'
+              }`}
               autoComplete="email"
               required
             />
+            {emailError ? (
+              <p className="text-small text-error-100">{emailError}</p>
+            ) : null}
           </div>
 
           <div className="space-y-2">
-            <label htmlFor="password" className="text-sm text-white/85">
+            <label htmlFor="password" className="text-small text-gray-100">
               Senha
             </label>
             <input
@@ -116,47 +165,54 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••••"
-              className="w-full rounded-xl border border-white/15 bg-white/[0.04] px-4 py-3 text-white placeholder:text-white/35 outline-none transition focus:border-white/30"
+              className={`w-full rounded-xl border px-4 py-3 text-white placeholder:text-gray-500 outline-none transition ${
+                passwordError
+                  ? 'border-error-500 bg-error-100/10'
+                  : 'border-gray-500 bg-white/[0.04] focus:border-primary-500'
+              }`}
               autoComplete="current-password"
               required
             />
+            {passwordError ? (
+              <p className="text-small text-error-100">{passwordError}</p>
+            ) : null}
           </div>
 
           <div className="flex justify-end">
-            <button
-              type="button"
-              className="cursor-pointer text-sm text-white/70 underline underline-offset-4"
+            <Link
+              href="/forgot-password"
+              className="cursor-pointer text-small text-gray-300 underline underline-offset-4"
             >
               Esqueceu sua senha?
-            </button>
+            </Link>
           </div>
 
-          {error ? (
-            <p className="rounded-xl border border-red-300/25 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-              {error}
+          {globalError ? (
+            <p className="rounded-[8px] border border-error-500 bg-error-100/20 px-3 py-2 text-small text-error-100">
+              {globalError}
             </p>
           ) : null}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="cursor-pointer w-full rounded-xl bg-[#22C985] px-4 py-3 font-semibold text-[#052014] transition hover:bg-[#1ab375] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loading ? 'Entrando...' : 'Entrar'}
-            </button>
-          </form>
+          <button
+            type="submit"
+            disabled={loading}
+            className="cursor-pointer w-full rounded-xl bg-primary-500 px-4 py-3 font-semibold text-white transition hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? 'Entrando...' : 'Entrar'}
+          </button>
+        </form>
 
-        <p className="mt-6 text-center text-sm text-white/70">
+        <p className="mt-6 text-center text-small text-gray-300">
           Ainda não tem uma conta?{' '}
           <Link
             href="/register"
-            className="cursor-pointer font-semibold text-[#22C985] underline underline-offset-4"
+            className="cursor-pointer font-semibold text-success-500 underline underline-offset-4"
           >
             Cadastre-se
           </Link>
         </p>
 
-        <p className="mt-4 text-center text-[11px] text-white/35">
+        <p className="mt-4 text-center text-[11px] text-gray-500">
           API: <span className="font-mono">{API_BASE_URL}</span>
         </p>
       </div>
