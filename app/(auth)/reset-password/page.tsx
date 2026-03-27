@@ -2,102 +2,75 @@
 
 import Link from 'next/link'
 import { FormEvent, useEffect, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import axios from 'axios'
+import { useRouter } from 'next/navigation'
 
-import { API_BASE_URL } from '@/lib/api'
-
-type ResetPasswordResponse = {
-  message?: string
-  [key: string]: unknown
-}
-
-type ApiErrorPayload = {
-  error?: {
-    code?: string
-    message?: string
-    details?: Record<string, string[] | string | undefined>
-  }
-}
-
-const getFirstError = (value: string[] | string | undefined) => {
-  if (Array.isArray(value)) return value[0] ?? ''
-  if (typeof value === 'string') return value
-  return ''
-}
+import { getSupabaseClient, isSupabaseConfigured } from '@/lib/supabase'
 
 export default function ResetPasswordPage() {
   const router = useRouter()
-  const searchParams = useSearchParams()
 
-  const [token, setToken] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [globalError, setGlobalError] = useState('')
-  const [tokenError, setTokenError] = useState('')
   const [passwordError, setPasswordError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
+  const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const tokenFromQuery = searchParams.get('token')
-    if (tokenFromQuery) {
-      setToken(tokenFromQuery)
+    const prepareReset = async () => {
+      if (!isSupabaseConfigured) {
+        setGlobalError('Supabase não configurado no frontend.')
+        return
+      }
+
+      const supabase = getSupabaseClient()
+      const { data, error } = await supabase.auth.getSession()
+
+      if (error) {
+        setGlobalError(error.message || 'Não foi possível validar o link de redefinição.')
+        return
+      }
+
+      if (!data.session) {
+        setGlobalError('Link inválido ou expirado. Solicite uma nova recuperação de senha.')
+        return
+      }
+
+      setReady(true)
     }
-  }, [searchParams])
+
+    prepareReset()
+  }, [])
 
   const handleResetPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setGlobalError('')
-    setTokenError('')
     setPasswordError('')
     setSuccessMessage('')
+
+    if (password.length < 8) {
+      setPasswordError('A senha deve ter no mínimo 8 caracteres')
+      return
+    }
+
     setLoading(true)
 
     try {
-      const response = await axios.post<ResetPasswordResponse>(
-        `${API_BASE_URL}/api/auth/reset-password`,
-        { password, token },
-        { withCredentials: true },
-      )
+      const supabase = getSupabaseClient()
+      const { error } = await supabase.auth.updateUser({ password })
 
-      const data = response.data ?? {}
-      const message =
-        typeof data.message === 'string'
-          ? data.message
-          : 'Senha redefinida com sucesso.'
-      setSuccessMessage(message)
+      if (error) {
+        setGlobalError(error.message || 'Erro ao redefinir senha.')
+        return
+      }
+
+      setSuccessMessage('Senha redefinida com sucesso.')
 
       setTimeout(() => {
         router.push('/login')
       }, 1200)
-    } catch (err) {
-      if (axios.isAxiosError(err)) {
-        const apiError = (err.response?.data as ApiErrorPayload | undefined)?.error
-        const code = apiError?.code
-        const message = apiError?.message || 'Erro ao redefinir senha.'
-        const details = apiError?.details || {}
-
-        const nextPasswordError = getFirstError(details.password)
-        const nextTokenError =
-          code === 'invalid_reset_token'
-            ? 'Link inválido ou expirado.'
-            : getFirstError(details.token)
-
-        setTokenError(nextTokenError)
-        setPasswordError(nextPasswordError)
-
-        if (code === 'invalid_reset_token') {
-          setGlobalError('Link inválido ou expirado.')
-        } else if (!nextTokenError && !nextPasswordError) {
-          setGlobalError(message)
-        }
-
-        console.log('[RESET][CATCH] status:', err.response?.status)
-        console.log('[RESET][CATCH] payload:', err.response?.data)
-        console.log('[RESET][CATCH] parsed:', { code, message, details })
-      } else {
-        setGlobalError('Erro inesperado ao redefinir senha.')
-      }
+    } catch {
+      setGlobalError('Erro inesperado ao redefinir senha.')
     } finally {
       setLoading(false)
     }
@@ -111,39 +84,10 @@ export default function ResetPasswordPage() {
       <div className="w-full max-w-md rounded-[30px] border border-white/10 bg-gradient-to-b from-gray-700/40 to-gray-900/70 p-8 text-white shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur-md">
         <h1 className="text-h1 text-white">Redefinir senha</h1>
         <p className="mt-2 text-body text-gray-300">
-          Informe o token recebido e sua nova senha.
+          Defina sua nova senha de acesso.
         </p>
 
         <form onSubmit={handleResetPassword} className="mt-10 space-y-5">
-          {!token ? (
-            <p className="rounded-[8px] border border-error-500 bg-error-100/20 px-3 py-2 text-small text-error-100">
-              Token não encontrado na URL. Abra o link recebido por email.
-            </p>
-          ) : null}
-
-          <div className="space-y-2">
-            <label htmlFor="token" className="text-small text-gray-100">
-              Token
-            </label>
-            <input
-              id="token"
-              type="text"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Token de recuperação"
-              className={`w-full rounded-xl border px-4 py-3 text-white placeholder:text-gray-500 outline-none transition ${
-                tokenError
-                  ? 'border-error-500 bg-error-100/10'
-                  : 'border-gray-500 bg-white/[0.04] focus:border-primary-500'
-              }`}
-              autoComplete="off"
-              required
-            />
-            {tokenError ? (
-              <p className="text-small text-error-100">{tokenError}</p>
-            ) : null}
-          </div>
-
           <div className="space-y-2">
             <label htmlFor="password" className="text-small text-gray-100">
               Nova senha
@@ -181,7 +125,7 @@ export default function ResetPasswordPage() {
 
           <button
             type="submit"
-            disabled={loading || !token}
+            disabled={loading || !ready}
             className="cursor-pointer w-full rounded-xl bg-success-500 px-4 py-3 font-semibold text-white transition hover:bg-success-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? 'Redefinindo...' : 'Redefinir senha'}

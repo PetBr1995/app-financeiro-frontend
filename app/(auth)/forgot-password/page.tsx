@@ -2,79 +2,42 @@
 
 import Link from 'next/link'
 import { FormEvent, useState } from 'react'
-import axios from 'axios'
 
-import { API_BASE_URL } from '@/lib/api'
-
-type ForgotPasswordResponse = {
-  message?: string
-  [key: string]: unknown
-}
-
-type ApiErrorPayload = {
-  error?: {
-    code?: string
-    message?: string
-    details?: Record<string, string[] | string | undefined>
-  }
-}
-
-const getFirstError = (value: string[] | string | undefined) => {
-  if (Array.isArray(value)) return value[0] ?? ''
-  if (typeof value === 'string') return value
-  return ''
-}
+import { getSupabaseClient, isSupabaseConfigured } from '@/lib/supabase'
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
   const [globalError, setGlobalError] = useState('')
-  const [emailError, setEmailError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
 
   const handleForgotPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setGlobalError('')
-    setEmailError('')
     setSuccessMessage('')
     setLoading(true)
 
     try {
-      const response = await axios.post<ForgotPasswordResponse>(
-        `${API_BASE_URL}/api/auth/forgot-password`,
-        { email },
-        { withCredentials: true },
-      )
-
-      const data = response.data ?? {}
-      console.log('[FORGOT][TRY] status:', response.status)
-      console.log('[FORGOT][TRY] payload:', data)
-      const message =
-        typeof data.message === 'string'
-          ? data.message
-          : 'Solicitação enviada com sucesso.'
-      setSuccessMessage(message)
-    } catch (err) {
-      if (axios.isAxiosError(err)) {
-        const apiError = (err.response?.data as ApiErrorPayload | undefined)?.error
-        const code = apiError?.code
-        const message = apiError?.message || 'Erro ao solicitar recuperação.'
-        const details = apiError?.details || {}
-
-        const nextEmailError = getFirstError(details.email)
-        setEmailError(nextEmailError)
-
-        if (code === 'email_not_configured') {
-          setGlobalError('Serviço de email não configurado no backend.')
-        } else if (!nextEmailError) {
-          setGlobalError(message)
-        }
-
-        console.log('[FORGOT][CATCH] status:', err.response?.status)
-        console.log('[FORGOT][CATCH] payload:', err.response?.data)
-      } else {
-        setGlobalError('Erro inesperado ao solicitar recuperação.')
+      if (!isSupabaseConfigured) {
+        setGlobalError('Supabase não configurado no frontend.')
+        return
       }
+
+      const supabase = getSupabaseClient()
+      const redirectTo =
+        process.env.NEXT_PUBLIC_PASSWORD_RESET_REDIRECT_URL ||
+        `${window.location.origin}/reset-password`
+
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
+
+      if (error) {
+        setGlobalError(error.message || 'Erro ao solicitar recuperação.')
+        return
+      }
+
+      setSuccessMessage('Se o email existir, você receberá um link de recuperação em instantes.')
+    } catch {
+      setGlobalError('Erro inesperado ao solicitar recuperação.')
     } finally {
       setLoading(false)
     }
@@ -88,7 +51,7 @@ export default function ForgotPasswordPage() {
       <div className="w-full max-w-md rounded-[30px] border border-white/10 bg-gradient-to-b from-gray-700/40 to-gray-900/70 p-8 text-white shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur-md">
         <h1 className="text-h1 text-white">Recuperar senha</h1>
         <p className="mt-2 text-body text-gray-300">
-          Informe seu email para receber o token de redefinição.
+          Informe seu email para receber o link de redefinição.
         </p>
 
         <form onSubmit={handleForgotPassword} className="mt-10 space-y-5">
@@ -102,17 +65,10 @@ export default function ForgotPasswordPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="user@example.com"
-              className={`w-full rounded-xl border px-4 py-3 text-white placeholder:text-gray-500 outline-none transition ${
-                emailError
-                  ? 'border-error-500 bg-error-100/10'
-                  : 'border-gray-500 bg-white/[0.04] focus:border-primary-500'
-              }`}
+              className="w-full rounded-xl border border-gray-500 bg-white/[0.04] px-4 py-3 text-white placeholder:text-gray-500 outline-none transition focus:border-primary-500"
               autoComplete="email"
               required
             />
-            {emailError ? (
-              <p className="text-small text-error-100">{emailError}</p>
-            ) : null}
           </div>
 
           {globalError ? (
